@@ -105,6 +105,7 @@ pop_base_1A <- left_join(pop_quadkey, popbaselong, by = c('lat'='lat','lon'='lon
 
 # --- Data Imputation (1A): Step 2 ---
 pop_base_1A$num <- pop_base_1A$percent_change/100 *(pop_base_1A$baseline+1) + pop_base_1A$baseline
+pop_base_1A$num[pop_base_1A$num < 0] <- 0
 
 # --- Data Imputation: Step 1B ---
 # Estimation of missing baseline values for the tiles that lacks all baselines.
