@@ -165,16 +165,17 @@ amin <-min(abs(diff(a)))
 bmin<- min(abs(diff(b)))
 
 #raster sample for resample, using 2021-2022 for smaller size
-pop_sample <-  pop2 %>% filter(Date >= '2021-05-01' & Date < '2022-05-01') %>%
+pop_sample <-  pop2 %>%
   group_by(lat,lon) %>%
   summarise(value = mean(percent_change))
-coordinates(pop_sample) <- c("lon", "lat")
-pop_sample$value <- as.numeric(pop_sample$value) 
-proj4string(pop_sample) <- CRS("+proj=longlat +datum=WGS84")
-pop_meanweekrast  <- terra::rasterize(pop_sample, 
-                                      raster::raster(pop_sample, resolution = c(amin, bmin)), 
-                                      pop_sample$value)
-pop_meanweekrast <- rast(pop_meanweekrast)
+min_lat <- min(pop_sample$lat, na.rm = TRUE)
+max_lat <- max(pop_sample$lat, na.rm = TRUE)
+min_lon <- min(pop_sample$lon, na.rm = TRUE)
+max_lon <- max(pop_sample$lon, na.rm = TRUE)
+
+expanded_extent <- terra::ext(min_lon - 0.5, max_lon + 0.5, min_lat - 0.5, max_lat + 0.5)
+pop_meanweekrast <- terra::rast(ext=expanded_extent, res=c(amin, bmin), crs='EPSG:4326')
+
 
 # resample
 worldpop_2019 <- aggregate(worldpop_2019, fact=c(amin/worldpop_2019@ptr[["res"]][1], bmin/worldpop_2019@ptr[["res"]][1]), fun=sum, na.rm = TRUE)
