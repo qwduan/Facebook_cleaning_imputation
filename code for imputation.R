@@ -161,8 +161,8 @@ pop2 <- pop_quadkey
 # find resolution of FB popualtion data
 a <- unique(pop2$lon)
 b <-unique(pop2$lat)
-amin <-min(abs(diff(a)))
-bmin<- min(abs(diff(b)))
+amin <-min(abs(diff(sort(a))))
+bmin <- min(abs(diff(sort(b))))
 
 #raster sample for resample, using 2021-2022 for smaller size
 pop_sample <-  pop2 %>%
