@@ -111,10 +111,61 @@ pop_base_1A$num[pop_base_1A$num < 0] <- 0
 # Estimation of missing baseline values for the tiles that lacks all baselines.
 # 1B in the manuscript
 
+# Find missing tiles after imputation 1A
+pop_basev <- pop_base_1A %>% filter(!is.na(baseline)) %>% dplyr::select(-quadkey, -n_difference)
+pop_basena <- pop_base_1A %>% filter(is.na(baseline)) %>% dplyr::select(-quadkey, -n_difference)
+
+# Calculate the percentage of complete records after step 1A
+p_missing1 <- nrow(pop_basev) / nrow(pop_base_1A)
+p_missing1 <- nrow(pop_basev) / nrow(pop_base_1A)
+p_missing1
+
+##for resample
+pop_sample <- pop_quadkey %>%
+  group_by(lat, lon) %>%
+  summarise(value = mean(percent_change))
+
+coordinates(pop_sample) <- ~lon + lat
+proj4string(pop_sample) <- CRS("+proj=longlat +datum=WGS84")
+# Transform points to Web Mercator
+pop_mercator <- spTransform(pop_sample, CRS("+init=epsg:3857"))
+
+# Find the resolution
+a <- unique(pop_mercator$lon)
+b <-unique(pop_mercator$lat)
+amin <-min(abs(diff(sort(a))))
+bmin <- min(abs(diff(sort(b))))
+
+# Expand the extent
+min_lat <- min(pop_mercator$lat, na.rm = TRUE)- 5*bmin/2
+max_lat <- max(pop_mercator$lat, na.rm = TRUE)+ 5*bmin/2
+min_lon <- min(pop_mercator$lon, na.rm = TRUE)- 5*amin/2
+max_lon <- max(pop_mercator$lon, na.rm = TRUE)+ 5*amin/2
+
+expanded_extent <- terra::ext(min_lon, max_lon , min_lat, max_lat )
+raster_template <- rast(extent = expanded_extent, res = c(amin, bmin), crs = "+init=epsg:3857")
+rasterized_data <- terra::rasterize(pop_mercator, raster::raster(raster_template), field = "value")
+
+# Load raster data for population in 2019
+worldpop_2019 <- rast("C:/.../worldpop/Belgium/bel_ppp_2019_UNadj.tif")
+crs(worldpop_2019) <- "+proj=longlat +datum=WGS84"
+worldpop_2019_webmercator <- project(worldpop_2019, "+init=epsg:3857")
+
+# Resample the WorldPop population data to match the resolution of the FB population data
+worldpop_2019_webmercator <- aggregate(worldpop_2019_webmercator, fact=c(amin/worldpop_2019_webmercator@ptr[["res"]][1], bmin/worldpop_2019_webmercator@ptr[["res"]][1]), fun=sum, na.rm = TRUE)
+worldpopresa_2019 <-  resample(worldpop_2019_webmercator, raster_template  , method = "bilinear")
+worldpopresa_2019 <- worldpopresa_2019 *(amin/worldpop_2019_webmercator@ptr[["res"]][1])*(bmin/worldpop_2019_webmercator@ptr[["res"]][1])
+
+# Use the fill_baseline_data function to estimate missing values in the dataset
+data_a <- pop_basev
+raster_b <- worldpopresa_2019
+data_c <- pop_basena
+
 # Define a function for estimation using worldpop popualtion data
 fill_baseline_data <- function(data_a, raster_b, data_c) {
   # Obtain population value from raster image using latitude and longitude
-  data_a_sf <- st_as_sf(data_a, coords = c("lon", "lat"), crs = "EPSG:4326")
+  data_a_sf <- st_as_sf(data_a, coords = c("lon", "lat"), crs = '+proj=longlat +datum=WGS84')
+  data_a_sf  <- st_transform(data_a_sf, CRS("+init=epsg:3857"))
   raster_data <- raster_b
   filled_data_a <- data_a
   population <- terra::extract(raster_data, data_a_sf)
@@ -128,7 +179,8 @@ fill_baseline_data <- function(data_a, raster_b, data_c) {
   }),unique(data_a$week))
   
   # Obtain population value from raster image using latitude and longitude in dataset c
-  data_c_sf <- st_as_sf(data_c, coords = c("lon", "lat"), crs = "EPSG:4326")
+  data_c_sf <- st_as_sf(data_c, coords = c("lon", "lat"), crs = '+proj=longlat +datum=WGS84')
+  data_c_sf  <- st_transform(data_c_sf, CRS("+init=epsg:3857"))
   filled_data_c <- data_c
   extracted_c <- terra::extract(raster_data, data_c_sf)
   filled_data_c$population <- extracted_c[,2]
@@ -139,53 +191,9 @@ fill_baseline_data <- function(data_a, raster_b, data_c) {
     predictions <- predict(models[[day]], newdata = c_day)
     filled_data_c$est_baseline[data_c$week == day] <- predictions
   }
-  # The function processes the input datasets, uses raster data to estimate missing values, and returns the filled data
+  
   return(filled_data_c)
 }
-
-
-
-# Find missing tiles after imputation 1A
-pop_basev <- pop_base_1A %>% filter(!is.na(baseline)) %>% dplyr::select(-quadkey, -n_difference)
-pop_basena <- pop_base_1A %>% filter(is.na(baseline)) %>% dplyr::select(-quadkey, -n_difference)
-
-# Calculate the percentage of complete records after step 1A
-p_missing1 <- nrow(pop_basev) / nrow(pop_base_1A)
-
-# Load raster data for population in 2019
-worldpop_2019 <- rast("C:/.../worldpop/Belgium/bel_ppp_2019_UNadj.tif")
-
-# Resample the WorldPop population data to match the resolution of the FB population data
-
-pop2 <- pop_quadkey 
-# find resolution of FB popualtion data
-a <- unique(pop2$lon)
-b <-unique(pop2$lat)
-amin <-min(abs(diff(sort(a))))
-bmin <- min(abs(diff(sort(b))))
-
-#raster sample for resample, using 2021-2022 for smaller size
-pop_sample <-  pop2 %>%
-  group_by(lat,lon) %>%
-  summarise(value = mean(percent_change))
-min_lat <- min(pop_sample$lat, na.rm = TRUE)
-max_lat <- max(pop_sample$lat, na.rm = TRUE)
-min_lon <- min(pop_sample$lon, na.rm = TRUE)
-max_lon <- max(pop_sample$lon, na.rm = TRUE)
-
-expanded_extent <- terra::ext(min_lon - 0.5, max_lon + 0.5, min_lat - 0.5, max_lat + 0.5)
-pop_meanweekrast <- terra::rast(ext=expanded_extent, res=c(amin, bmin), crs='EPSG:4326')
-
-
-# resample
-worldpop_2019 <- aggregate(worldpop_2019, fact=c(amin/worldpop_2019@ptr[["res"]][1], bmin/worldpop_2019@ptr[["res"]][1]), fun=sum, na.rm = TRUE)
-worldpopresa_2019 <-  resample(worldpop_2019, pop_meanweekrast , method = "bilinear")
-worldpopresa_2019 <- worldpopresa_2019 *(amin/worldpop_2019@ptr[["res"]][1])*(bmin/worldpop_2019@ptr[["res"]][1])
-
-# Use the fill_baseline_data function to estimate missing values in the dataset
-data_a <- pop_basev
-raster_b <- worldpopresa_2019
-data_c <- pop_basena
 
 filled_data <- fill_baseline_data(data_a, raster_b, data_c)
 
